@@ -799,6 +799,8 @@ impl Worker {
             if let Some((name, ex)) = extractor {
                 self.extract(ws, kind, &name, ex)?;
             }
+        } else {
+            self.reopen_target(ws, kind)?;
         }
         // A coding agent resumes its own session; our loop resumes its kept transcript.
         let resumable = api.as_ref().is_none_or(crate::agent::ApiConversation::resumed);

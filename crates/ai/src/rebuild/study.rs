@@ -9,7 +9,33 @@ pub(super) fn is_electron_runtime(program: &Path) -> bool {
     program.parent().is_some_and(|dir| dir.join("resources/app.asar").is_file())
 }
 
+/// The program a later run reopens for its builder: the one the study looked at, in Deep mode on a
+/// local target, when it is still there. None otherwise (Clean room never opens the original).
+pub(super) fn program_to_reopen(target: &TargetRef, kind: &dyn TargetKind, deep: bool) -> Option<PathBuf> {
+    let TargetRef::Local { path } = target else { return None };
+    let program = locate(path, kind.studies_folder()).0;
+    (deep && program.exists()).then_some(program)
+}
+
 impl Worker {
+    /// A run after the first skips the study, so its session has nothing open and the builder's
+    /// first `native_*` calls said "Nothing is open yet" (#1421). Open what the study looked at, so
+    /// the builder's tool server gets it. A failure only says why: the builder can still open it.
+    pub(super) fn reopen_target(&mut self, ws: &mut Workspace, kind: &dyn TargetKind) -> Result<(), ToolError> {
+        let (deep, open) = {
+            let session = self.engine.session();
+            (!session.clean_room(), !session.shared_targets().is_empty())
+        };
+        let Some(program) = program_to_reopen(&ws.manifest.target, kind, deep).filter(|_| !open) else { return Ok(()) };
+        if let Err(e) = self.call("core_target_open", json!({"path": program.display().to_string()})) {
+            if e.code == ErrorCode::Cancelled {
+                return Err(e);
+            }
+            self.step(ws, Step::Build, Status::Building, &format!("Couldn't open {} again for the builder: {}", program.display(), e.message))?;
+        }
+        Ok(())
+    }
+
     pub(super) fn study(&mut self, ws: &mut Workspace, kind: &dyn TargetKind) -> Result<(), ToolError> {
         match ws.manifest.target.clone() {
             TargetRef::Website { url } => {

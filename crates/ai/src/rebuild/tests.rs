@@ -3276,6 +3276,55 @@ fn decompiling_once_is_remembered_by_the_project() {
     assert!(Workspace::open(&ws.root).unwrap().manifest.decompiled, "a later run reads it from craft.json");
 }
 
+/// A later run skips the study; in Deep mode it opens the program again, so the builder's tool
+/// server has it and its first `native_*` call doesn't say "Nothing is open yet" (#1421).
+#[test]
+fn a_later_run_opens_the_projects_program_again_for_the_builder() {
+    let d = tempfile::tempdir().unwrap();
+    let program = d.path().join("game.bin");
+    std::fs::write(&program, b"not really a program").unwrap();
+    let target = TargetRef::Local { path: program.clone() };
+    let app = kind("app");
+    assert_eq!(study::program_to_reopen(&target, app.as_ref(), true), Some(program.clone()));
+    assert_eq!(study::program_to_reopen(&target, app.as_ref(), false), None, "Clean room never opens the original");
+    assert_eq!(study::program_to_reopen(&TargetRef::Local { path: d.path().join("gone.bin") }, app.as_ref(), true), None, "nothing to open");
+    assert_eq!(study::program_to_reopen(&TargetRef::None, app.as_ref(), true), None);
+
+    for deep in [true, false] {
+        let mut ws = Workspace::create(d.path(), &format!("Copy {deep}"), "Copy this app", target.clone()).unwrap();
+        let mut s = craft_anything_engine::testing::session();
+        s.settings.deep_mode = deep;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut w = Worker {
+            wake: Default::default(),
+            engine: Arc::new(Engine::new(s)),
+            tx,
+            stop: CancelToken::default(),
+            preview: Arc::default(),
+            seen: HashSet::new(),
+            inbox: Inbox::new(ws.inbox_dir()),
+            editor: None,
+            notes: Arc::default(),
+            feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+            keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+            kept_checks: Mutex::default(),
+            assets: false,
+            usage: None,
+            self_check: None,
+            reset_progress_after_notes: false,
+        };
+        w.reopen_target(&mut ws, app.as_ref()).unwrap();
+        let opened: Vec<PathBuf> = w.engine.session().shared_targets().into_iter().map(|t| t.path).collect();
+        if deep {
+            assert_eq!(opened, [program.clone()], "the builder's tool server is handed the program");
+            w.reopen_target(&mut ws, app.as_ref()).unwrap();
+            assert_eq!(w.engine.session().shared_targets().len(), 1, "an open program isn't opened twice");
+        } else {
+            assert!(opened.is_empty(), "Clean room opens nothing");
+        }
+    }
+}
+
 #[test]
 fn every_kind_leads_tests_its_own_build_and_keeps_its_unknowns() {
     let d = tempfile::tempdir().unwrap();
