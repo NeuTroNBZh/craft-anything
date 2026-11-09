@@ -3276,6 +3276,23 @@ fn decompiling_once_is_remembered_by_the_project() {
     assert!(Workspace::open(&ws.root).unwrap().manifest.decompiled, "a later run reads it from craft.json");
 }
 
+/// A later request's run, reading the project from disk, reminds only a builder that never
+/// decompiled in it, and only in Deep mode on a program.
+#[test]
+fn a_later_request_is_reminded_only_when_nothing_was_decompiled() {
+    let d = tempfile::tempdir().unwrap();
+    let program = TargetRef::Local { path: d.path().join("game.exe") };
+    let mut ws = Workspace::create(d.path(), "Sim", "Recreate this game", program).unwrap();
+    let reopened = |ws: &Workspace| Workspace::open(&ws.root).unwrap().manifest;
+    assert!(needs_decompile_reminder(true, &reopened(&ws)), "nothing decompiled yet");
+    assert!(!needs_decompile_reminder(false, &reopened(&ws)), "Clean room never decompiles");
+    ws.manifest.decompiled = true;
+    ws.save().unwrap();
+    assert!(!needs_decompile_reminder(true, &reopened(&ws)), "decompiled in an earlier run");
+    let none = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    assert!(!needs_decompile_reminder(true, &none.manifest), "no program to decompile");
+}
+
 #[test]
 fn every_kind_leads_tests_its_own_build_and_keeps_its_unknowns() {
     let d = tempfile::tempdir().unwrap();
