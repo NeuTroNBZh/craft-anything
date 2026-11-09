@@ -773,8 +773,10 @@ Owner: open · Status: in progress
       `craft-anything-cli uninstall` delete the sessions of records nobody holds. Over SSH, the
       delete runs on the host too
       — claimed: justinjohn0306, branch bugfix/r2.2-opencode-leftover-sessions
-- [ ] Sweep leftover agent sessions when the desktop app starts, not only at the next agent turn
-      or `craft-anything-cli uninstall` (#1115)
+- [x] Sweep leftover agent sessions when the desktop app starts, not only at the next agent turn
+      or `craft-anything-cli uninstall` (#1115) — a background thread at start-up, so a delete
+      over SSH can't hold up the window
+      — claimed: AlexJoaquimPereira, branch bugfix/r2.2-startup-session-sweep
 - [ ] A turn stopped before OpenCode's first event leaves no session id to delete: OpenCode names its
       session only in that event, so the session it may already have made stays (#1115, review on
       #1176). Needs a session id known before the run (one we create and pass in), if OpenCode allows it
