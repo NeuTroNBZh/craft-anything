@@ -661,6 +661,9 @@ Owner: maintainers · Status: in progress
 
 ### R2.2 More coding agents
 Owner: open · Status: in progress
+- [x] Find Codex bundled with ChatGPT.app/Codex.app after a macOS Dock launch, and
+      verify the selected CLI's sign-in through the headless connection check and Settings.
+      — claimed: dbzx6r, branch bugfix/r2.2-macos-codex-signin-upstream
 - [x] A saved agent program path that no longer exists (Codex desktop moves its CLI to a new
       build folder on every update) says so and names the path, instead of "isn't installed or
       isn't on your PATH" (#721); it stays a missing program, so a builder turn isn't retried
@@ -770,8 +773,10 @@ Owner: open · Status: in progress
       `craft-anything-cli uninstall` delete the sessions of records nobody holds. Over SSH, the
       delete runs on the host too
       — claimed: justinjohn0306, branch bugfix/r2.2-opencode-leftover-sessions
-- [ ] Sweep leftover agent sessions when the desktop app starts, not only at the next agent turn
-      or `craft-anything-cli uninstall` (#1115)
+- [x] Sweep leftover agent sessions when the desktop app starts, not only at the next agent turn
+      or `craft-anything-cli uninstall` (#1115) — a background thread at start-up, so a delete
+      over SSH can't hold up the window
+      — claimed: AlexJoaquimPereira, branch bugfix/r2.2-startup-session-sweep
 - [ ] A turn stopped before OpenCode's first event leaves no session id to delete: OpenCode names its
       session only in that event, so the session it may already have made stays (#1115, review on
       #1176). Needs a session id known before the run (one we create and pass in), if OpenCode allows it
@@ -1141,9 +1146,17 @@ Gaps found while using the app for real projects.
       mode, or a version-1 one (counts as Deep), isn't resumed. A same-mode continuation keeps its
       transcript and carries on; a mismatch studies again from the brief. Claimed:
       AlexJoaquimPereira, branch bugfix/r2.9-api-transcript-mode
-- [ ] Study can still be skipped after a mode switch: a coding agent's `builder_started()` is
-      mode-unaware, and an API follow-up message with an existing capture leaves `first` false even
-      when the transcript was rejected. Gate both on the run's mode
+- [x] Study can still be skipped after a mode switch: a coding agent's `builder_started()` was
+      mode-unaware, and an API follow-up message with an existing capture left `first` false even
+      when the transcript was rejected. Gate both on the run's mode — `builder_session_in` matches
+      the saved session's mode, and a run studies again when its only kept conversation is in the
+      other mode; a follow-up with no kept conversation keeps its old path
+      — claimed: AlexJoaquimPereira, branch bugfix/r2.9-mode-switch-study
+- [ ] Exercise a mode-switched API follow-up end to end: an other-mode transcript, a capture and a
+      message must study again, not only the decision helper
+- [ ] Record which mode wrote `capture/`, so a failed run that leaves a capture from the other mode
+      isn't handed to a same-mode conversation; remove Deep-only capture files when a Clean room
+      study replaces them
 - [ ] A saved Claude `--resume`/`--continue` in the backend's extra arguments is refused in a
       Clean room build or question when it would reuse the project's Deep session, leaving
       unrelated arguments alone; unit and scripted CLI tests cover the build and question paths
@@ -1291,6 +1304,16 @@ Gaps found while using the app for real projects.
       Clean room); a failure is said in the feed and the builder can still open it. Unit test
       only; not run live
       — claimed: NeuTroNBZh, branch bugfix/1421-reopen-project-target
+- [x] `rebuild_check` said "no build is running" when the run had taken the check and one of its
+      steps hadn't finished: on a Windows Unity build, three checks in a row stopped at
+      "game-self-test" and the builder gave up after its default 20 minutes, below the run's own
+      30-minute limit on a check. The run now marks a request it takes, the tool tells "still
+      going" (`TimedOut`) from "no run took it", and its default wait (35 min) outlasts the run's
+      limit, so the run reports a stuck check itself. Unit tests only; the stuck self-test wasn't
+      reproduced (the same game's `--self-test` now exits in 16 s)
+      — claimed: NeuTroNBZh, branch bugfix/r2.9-rebuild-check-wait
+- [ ] Find why a builder's own check stayed on "game-self-test" for over 20 minutes on Windows,
+      past the run's 90 s limit on the game's run (seen three times with a Unity 6000.6 build)
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress

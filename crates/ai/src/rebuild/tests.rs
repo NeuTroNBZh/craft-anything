@@ -2083,7 +2083,7 @@ mod picking_up_a_build {
         };
         let mut opts = RunOptions::default();
         opts.kinds.register(Arc::new(FlakyKind));
-        let error = worker.run(&mut ws, entry, Some(api), None, &opts).unwrap_err();
+        let error = worker.run(&mut ws, entry, Some(api), None, super::super::KeptHistory { in_mode: true, elsewhere: false }, &opts).unwrap_err();
         assert!(error.message.contains("two builder turns"), "{error:?}");
         assert_eq!(seen.lock().unwrap().len(), 2);
     }
@@ -2194,7 +2194,7 @@ mod picking_up_a_build {
                 };
                 let mut opts = RunOptions::default();
                 opts.kinds.register(Arc::new(NoteKind { notes: worker.notes.clone(), add: mode == "queued-check", text }));
-                let error = worker.run(&mut ws, entry, Some(api), None, &opts).unwrap_err();
+                let error = worker.run(&mut ws, entry, Some(api), None, super::super::KeptHistory { in_mode: true, elsewhere: false }, &opts).unwrap_err();
                 assert!(error.message.contains("two builder turns"), "{error:?}");
                 let requests = seen.lock().unwrap();
                 let expected = if text.trim().is_empty() {
@@ -2280,6 +2280,7 @@ mod picking_up_a_build {
             let mut ws = worked_on(&b);
             ws.manifest.agent_session_deep = saved;
             ws.save().unwrap();
+            std::fs::write(ws.capture_dir().join("README.md"), "# What we found in the Deep run\n\ninside evidence").unwrap();
             b.hub.engine.session().settings.deep_mode = deep;
             let seen = Arc::new(craft_anything_platform::sync::Mutex::new(Vec::new()));
             let mut adapters = crate::cli_agents::AgentAdapters::built_in();
@@ -2289,6 +2290,11 @@ mod picking_up_a_build {
             let told = std::fs::read_to_string(&b.prompts).unwrap();
             assert_eq!(told.contains("Pick up where you left off"), continued, "saved={saved:?}, deep={deep}: {told}");
             assert_eq!(told.contains("Their request"), !continued, "a fresh start gets the brief: {told}");
+            let readme = std::fs::read_to_string(ws.capture_dir().join("README.md")).unwrap();
+            assert_eq!(readme.contains("What we found"), continued, "saved={saved:?}, deep={deep}: the Deep notes are replaced: {readme}");
+            if !continued {
+                assert!(readme.contains("# No target"), "saved={saved:?}, deep={deep}: the new study wrote its notes: {readme}");
+            }
             let expected = continued.then_some("session-1");
             let seen = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             assert!(!seen.is_empty(), "saved={saved:?}, deep={deep}: the stand-in ran");
@@ -2400,23 +2406,41 @@ mod picking_up_a_build {
         drop(run);
     }
 
-    /// R2.9: an API transcript from the other mode isn't "carrying on", so a no-message run still
-    /// studies as a fresh one instead of skipping the Deep study.
+    /// R2.9: a transcript from the other mode isn't "carrying on", so a no-message run still
+    /// studies as a fresh one instead of skipping the Deep study. A follow-up message with a
+    /// rejected transcript studies too, even when a capture from the other mode exists.
     #[test]
     fn an_api_transcript_from_the_other_mode_is_not_carried_on() {
-        let d = tempfile::tempdir().unwrap();
-        let ws = Workspace::create(d.path(), "x", "A thing", TargetRef::None).unwrap();
         let mut opts = RunOptions::default();
-        assert!(!super::super::is_carrying_on(&opts, &ws, true), "nothing is under way yet");
-        std::fs::write(ws.transcript_path(), b"{}").unwrap();
-        assert!(super::super::is_carrying_on(&opts, &ws, true), "a transcript in this mode is carried on");
-        assert!(!super::super::is_carrying_on(&opts, &ws, false), "another mode's transcript is not");
+        assert!(!super::super::is_carrying_on(&opts, false), "nothing is under way yet");
+        assert!(super::super::is_carrying_on(&opts, true), "a transcript in this mode is carried on");
         opts.message = Some("change it".into());
-        assert!(!super::super::is_carrying_on(&opts, &ws, true), "a new request isn't carrying on");
+        assert!(!super::super::is_carrying_on(&opts, true), "a new request isn't carrying on");
         opts.message = None;
         opts.continuing = true;
-        assert!(super::super::is_carrying_on(&opts, &ws, true), "an explicit resume in this mode is");
-        assert!(!super::super::is_carrying_on(&opts, &ws, false), "one in another mode is not");
+        assert!(super::super::is_carrying_on(&opts, true), "an explicit resume in this mode is");
+        assert!(!super::super::is_carrying_on(&opts, false), "one in another mode is not");
+    }
+
+    /// R2.9: a follow-up with a conversation kept in the other mode studies even when a capture
+    /// exists; one that resumed a conversation in this mode builds from the capture without
+    /// studying again. A fresh follow-up with no conversation at all keeps the old no-study path.
+    #[test]
+    fn a_rejected_transcript_studies_even_with_a_capture() {
+        use super::super::{KeptHistory, starts_with_study};
+        let opts = RunOptions::default();
+        let none = KeptHistory::default();
+        assert!(starts_with_study(&opts, none, true), "no conversation for this mode studies");
+        let mut follow_up = RunOptions { message: Some("change it".into()), ..Default::default() };
+        assert!(!starts_with_study(&follow_up, none, true), "a fresh follow-up with a capture doesn't study");
+        assert!(starts_with_study(&follow_up, KeptHistory { elsewhere: true, ..Default::default() }, true), "a conversation rejected for mode studies");
+        assert!(!starts_with_study(&follow_up, KeptHistory { in_mode: true, ..Default::default() }, true), "a conversation in this mode carries on");
+        assert!(starts_with_study(&opts, KeptHistory { in_mode: true, ..Default::default() }, false), "no capture to build from: study");
+        follow_up.message = None;
+        assert!(
+            !starts_with_study(&follow_up, KeptHistory { in_mode: true, ..Default::default() }, true),
+            "a same-mode continuation studies only without a capture"
+        );
     }
 
     /// A saved session records the mode it ran in, and a lost one clears both.
@@ -3216,6 +3240,8 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
     let steps: Vec<String> = rx.try_iter().filter_map(|e| if let RunEvent::Step { text, .. } = e { Some(text) } else { None }).collect();
     assert!(steps.iter().any(|s| s.contains("checking its work")) && steps.iter().any(|s| s.contains("checked its work")), "the person sees it: {steps:?}");
     assert!(Inbox::new(self_check::asks_dir(&ws.root)).pending().is_empty(), "nothing left waiting");
+    let left: Vec<_> = std::fs::read_dir(self_check::asks_dir(&ws.root)).unwrap().flatten().map(|e| e.file_name()).collect();
+    assert!(left.iter().all(|n| !n.to_string_lossy().ends_with(".taken")), "the run clears its mark once it answers: {left:?}");
 }
 
 /// A builder that reads one decompiled function (by its MCP name, as Claude Code calls it) and ends
@@ -3276,55 +3302,21 @@ fn decompiling_once_is_remembered_by_the_project() {
     assert!(Workspace::open(&ws.root).unwrap().manifest.decompiled, "a later run reads it from craft.json");
 }
 
-/// A later run skips the study; in Deep mode it opens the program again, so the builder's tool
-/// server has it and its first `native_*` call doesn't say "Nothing is open yet" (#1421).
+/// A later request's run, reading the project from disk, reminds only a builder that never
+/// decompiled in it, and only in Deep mode on a program.
 #[test]
-fn a_later_run_opens_the_projects_program_again_for_the_builder() {
+fn a_later_request_is_reminded_only_when_nothing_was_decompiled() {
     let d = tempfile::tempdir().unwrap();
-    let program = d.path().join("game.bin");
-    std::fs::write(&program, b"not really a program").unwrap();
-    let target = TargetRef::Local { path: program.clone() };
-    let app = kind("app");
-    assert_eq!(study::program_to_reopen(&target, app.as_ref(), true), Some(program.clone()));
-    assert_eq!(study::program_to_reopen(&target, app.as_ref(), false), None, "Clean room never opens the original");
-    assert_eq!(study::program_to_reopen(&TargetRef::Local { path: d.path().join("gone.bin") }, app.as_ref(), true), None, "nothing to open");
-    assert_eq!(study::program_to_reopen(&TargetRef::None, app.as_ref(), true), None);
-
-    for deep in [true, false] {
-        let mut ws = Workspace::create(d.path(), &format!("Copy {deep}"), "Copy this app", target.clone()).unwrap();
-        let mut s = craft_anything_engine::testing::session();
-        s.settings.deep_mode = deep;
-        let (tx, _rx) = std::sync::mpsc::channel();
-        let mut w = Worker {
-            wake: Default::default(),
-            engine: Arc::new(Engine::new(s)),
-            tx,
-            stop: CancelToken::default(),
-            preview: Arc::default(),
-            seen: HashSet::new(),
-            inbox: Inbox::new(ws.inbox_dir()),
-            editor: None,
-            notes: Arc::default(),
-            feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
-            keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
-            kept_checks: Mutex::default(),
-            assets: false,
-            usage: None,
-            self_check: None,
-            reset_progress_after_notes: false,
-        };
-        w.reopen_target(&mut ws, app.as_ref(), true).unwrap();
-        assert!(w.engine.session().shared_targets().is_empty(), "a builder over SSH isn't handed this computer's targets");
-        w.reopen_target(&mut ws, app.as_ref(), false).unwrap();
-        let opened: Vec<PathBuf> = w.engine.session().shared_targets().into_iter().map(|t| t.path).collect();
-        if deep {
-            assert_eq!(opened, [program.clone()], "the builder's tool server is handed the program");
-            w.reopen_target(&mut ws, app.as_ref(), false).unwrap();
-            assert_eq!(w.engine.session().shared_targets().len(), 1, "an open program isn't opened twice");
-        } else {
-            assert!(opened.is_empty(), "Clean room opens nothing");
-        }
-    }
+    let program = TargetRef::Local { path: d.path().join("game.exe") };
+    let mut ws = Workspace::create(d.path(), "Sim", "Recreate this game", program).unwrap();
+    let reopened = |ws: &Workspace| Workspace::open(&ws.root).unwrap().manifest;
+    assert!(needs_decompile_reminder(true, &reopened(&ws)), "nothing decompiled yet");
+    assert!(!needs_decompile_reminder(false, &reopened(&ws)), "Clean room never decompiles");
+    ws.manifest.decompiled = true;
+    ws.save().unwrap();
+    assert!(!needs_decompile_reminder(true, &reopened(&ws)), "decompiled in an earlier run");
+    let none = Workspace::create(d.path(), "Notes", "A notes app", TargetRef::None).unwrap();
+    assert!(!needs_decompile_reminder(true, &none.manifest), "no program to decompile");
 }
 
 #[test]
@@ -4093,4 +4085,55 @@ fn a_build_says_when_it_waits_for_an_analysis_started_earlier() {
         })
         .collect();
     assert!(said.iter().any(|t| t.contains("waiting for Ghidra's analysis of this program, started earlier")), "{said:?}");
+}
+
+/// A later run skips the study; in Deep mode it opens the program again, so the builder's tool
+/// server has it and its first `native_*` call doesn't say "Nothing is open yet" (#1421).
+#[test]
+fn a_later_run_opens_the_projects_program_again_for_the_builder() {
+    let d = tempfile::tempdir().unwrap();
+    let program = d.path().join("game.bin");
+    std::fs::write(&program, b"not really a program").unwrap();
+    let target = TargetRef::Local { path: program.clone() };
+    let app = kind("app");
+    assert_eq!(study::program_to_reopen(&target, app.as_ref(), true), Some(program.clone()));
+    assert_eq!(study::program_to_reopen(&target, app.as_ref(), false), None, "Clean room never opens the original");
+    assert_eq!(study::program_to_reopen(&TargetRef::Local { path: d.path().join("gone.bin") }, app.as_ref(), true), None, "nothing to open");
+    assert_eq!(study::program_to_reopen(&TargetRef::None, app.as_ref(), true), None);
+
+    for deep in [true, false] {
+        let mut ws = Workspace::create(d.path(), &format!("Copy {deep}"), "Copy this app", target.clone()).unwrap();
+        let mut s = craft_anything_engine::testing::session();
+        s.settings.deep_mode = deep;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut w = Worker {
+            wake: Default::default(),
+            engine: Arc::new(Engine::new(s)),
+            tx,
+            stop: CancelToken::default(),
+            preview: Arc::default(),
+            seen: HashSet::new(),
+            inbox: Inbox::new(ws.inbox_dir()),
+            editor: None,
+            notes: Arc::default(),
+            feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+            keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+            kept_checks: Mutex::default(),
+            assets: false,
+            usage: None,
+            self_check: None,
+            reset_progress_after_notes: false,
+        };
+        w.reopen_target(&mut ws, app.as_ref(), true).unwrap();
+        assert!(w.engine.session().shared_targets().is_empty(), "a builder over SSH isn't handed this computer's targets");
+        w.reopen_target(&mut ws, app.as_ref(), false).unwrap();
+        let opened: Vec<PathBuf> = w.engine.session().shared_targets().into_iter().map(|t| t.path).collect();
+        if deep {
+            assert_eq!(opened, [program.clone()], "the builder's tool server is handed the program");
+            w.reopen_target(&mut ws, app.as_ref(), false).unwrap();
+            assert_eq!(w.engine.session().shared_targets().len(), 1, "an open program isn't opened twice");
+        } else {
+            assert!(opened.is_empty(), "Clean room opens nothing");
+        }
+    }
 }
