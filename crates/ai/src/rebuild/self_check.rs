@@ -18,9 +18,11 @@ pub fn asks_dir(project: &Path) -> PathBuf {
 }
 
 /// The mark a run leaves beside a check request it has taken, until it answers, so
-/// `rebuild_check` can tell a check that is still going from a request no run took.
-pub fn taken_mark(project: &Path, id: &str) -> PathBuf {
-    asks_dir(project).join(format!("{id}.taken"))
+/// `rebuild_check` can tell a check that is still going from a request no run took. None for an
+/// id that isn't an inbox id (a request's file can carry any `id`): no mark outside the folder.
+pub fn taken_mark(project: &Path, id: &str) -> Option<PathBuf> {
+    let valid = !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    valid.then(|| asks_dir(project).join(format!("{id}.taken")))
 }
 
 /// Projects whose build runs in this process. A builder in this process (an API backend) calls
@@ -130,7 +132,9 @@ impl Worker {
         let asks = Inbox::new(asks_dir(&ws.root));
         for r in asks.pending() {
             let mark = taken_mark(&ws.root, &r.id);
-            if let Err(e) = std::fs::write(&mark, b"") {
+            if let Some(mark) = &mark
+                && let Err(e) = std::fs::write(mark, b"")
+            {
                 log::warn!("couldn't mark the builder's check as taken ({}): {e}", mark.display());
             }
             let checking = if ws.manifest.target == TargetRef::None {
@@ -151,7 +155,9 @@ impl Worker {
                 Err(e) => (format!("The check couldn't run: {}", e.message), "The builder's check couldn't run.".to_string()),
             };
             asks.answer(&r.id, &Answer { text: Some(text), ..Default::default() })?;
-            let _ = std::fs::remove_file(&mark);
+            if let Some(mark) = &mark {
+                let _ = std::fs::remove_file(mark);
+            }
             self.step(ws, Step::Build, Status::Building, &line)?;
         }
         Ok(())

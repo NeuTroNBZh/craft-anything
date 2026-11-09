@@ -489,8 +489,10 @@ fn rebuild_check(ctx: &mut Ctx<'_>, params: Value) -> Result<ToolOutput, ToolErr
     let answer = asks.wait(&id, Duration::from_secs(p.wait_minutes.saturating_mul(60)), &|| cancel.is_cancelled());
     // The run marks a request it has taken: without the mark, no run took it.
     let mark = self_check::taken_mark(&ws.root, &id);
-    let taken = mark.is_file();
-    let _ = std::fs::remove_file(&mark);
+    let taken = mark.as_ref().is_some_and(|m| m.is_file());
+    if let Some(mark) = &mark {
+        let _ = std::fs::remove_file(mark);
+    }
     match answer {
         Some(a) => Ok(ToolOutput::Value(json!({"project": ws.root.display().to_string(), "report": a.text.unwrap_or_default()}))),
         None if ctx.cancel.is_cancelled() => Err(ToolError::new(ErrorCode::Cancelled, "Stopped.")),
@@ -727,6 +729,11 @@ mod tests {
     #[test]
     fn a_check_still_going_is_told_apart_from_no_build() {
         assert!(Duration::from_secs(d_wait_minutes() * 60) > self_check::SELF_CHECK_LIMIT);
+        let root = Path::new("project");
+        assert!(self_check::taken_mark(root, "1762700000000-42-1").is_some_and(|m| m.starts_with(self_check::asks_dir(root))));
+        for bad in ["", "../../x", "..\\x", "c:x", "a/b"] {
+            assert!(self_check::taken_mark(root, bad).is_none(), "{bad:?} would put the mark outside checks/asks/");
+        }
         let going = unanswered(true, 35);
         assert_eq!(going.code, ErrorCode::TimedOut);
         assert!(going.message.contains("took the check") && !going.message.contains("No build is running"), "{}", going.message);
