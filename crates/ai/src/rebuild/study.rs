@@ -12,9 +12,13 @@ pub(super) fn is_electron_runtime(program: &Path) -> bool {
 /// The program a later run reopens for its builder: the one the study looked at, in Deep mode on a
 /// local target, when it is still there. None otherwise (Clean room never opens the original).
 pub(super) fn program_to_reopen(target: &TargetRef, kind: &dyn TargetKind, deep: bool) -> Option<PathBuf> {
+    // Clean room is decided first: locating the program reads the original's folder.
+    if !deep {
+        return None;
+    }
     let TargetRef::Local { path } = target else { return None };
     let program = locate(path, kind.studies_folder()).0;
-    (deep && program.exists()).then_some(program)
+    program.exists().then_some(program)
 }
 
 impl Worker {
@@ -26,7 +30,11 @@ impl Worker {
             let session = self.engine.session();
             (!session.clean_room(), !session.shared_targets().is_empty())
         };
-        let Some(program) = program_to_reopen(&ws.manifest.target, kind, deep).filter(|_| !open) else { return Ok(()) };
+        // Nothing to look for when something is open already.
+        if open {
+            return Ok(());
+        }
+        let Some(program) = program_to_reopen(&ws.manifest.target, kind, deep) else { return Ok(()) };
         if let Err(e) = self.call("core_target_open", json!({"path": program.display().to_string()})) {
             if e.code == ErrorCode::Cancelled {
                 return Err(e);
