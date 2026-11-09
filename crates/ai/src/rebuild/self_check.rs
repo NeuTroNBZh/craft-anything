@@ -17,8 +17,11 @@ pub fn asks_dir(project: &Path) -> PathBuf {
     project.join("checks").join("asks")
 }
 
-/// The mark a run leaves beside a check request it has taken, until it answers, so
-/// `rebuild_check` can tell a check that is still going from a request no run took. None for an
+/// What a builder's check gets when the build is stopped while it runs.
+pub const STOPPED_ANSWER: &str = "The build was stopped before this check finished, so there is nothing to report.";
+
+/// The mark a run leaves beside a check request it has taken, so `rebuild_check` can tell a
+/// check that is still going from a request no run took; `rebuild_check` removes it. None for an
 /// id that isn't an inbox id (a request's file can carry any `id`): no mark outside the folder.
 pub fn taken_mark(project: &Path, id: &str) -> Option<PathBuf> {
     let valid = !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
@@ -151,13 +154,20 @@ impl Worker {
                     let line = format!("The builder checked its work: {}.", summary(&checks, good_enough));
                     (report(&checks, good_enough, &open_questions(ws)), line)
                 }
-                Err(e) if e.code == ErrorCode::Cancelled => return Err(e),
+                Err(e) if e.code == ErrorCode::Cancelled => {
+                    // A stopped build says so: the builder isn't left waiting on a check that
+                    // nothing runs any more.
+                    let stopped = Answer { text: Some(STOPPED_ANSWER.to_string()), ..Default::default() };
+                    if let Err(a) = asks.answer(&r.id, &stopped) {
+                        log::warn!("couldn't tell the builder its check was stopped: {}", a.message);
+                    }
+                    return Err(e);
+                }
                 Err(e) => (format!("The check couldn't run: {}", e.message), "The builder's check couldn't run.".to_string()),
             };
+            // The mark stays: the asker reads it after its wait, then removes it, so an answer
+            // that lands as the wait ends can't make a taken check look untaken.
             asks.answer(&r.id, &Answer { text: Some(text), ..Default::default() })?;
-            if let Some(mark) = &mark {
-                let _ = std::fs::remove_file(mark);
-            }
             self.step(ws, Step::Build, Status::Building, &line)?;
         }
         Ok(())

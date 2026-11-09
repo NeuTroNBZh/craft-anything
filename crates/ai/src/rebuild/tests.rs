@@ -3241,7 +3241,9 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
     assert!(steps.iter().any(|s| s.contains("checking its work")) && steps.iter().any(|s| s.contains("checked its work")), "the person sees it: {steps:?}");
     assert!(Inbox::new(self_check::asks_dir(&ws.root)).pending().is_empty(), "nothing left waiting");
     let left: Vec<_> = std::fs::read_dir(self_check::asks_dir(&ws.root)).unwrap().flatten().map(|e| e.file_name()).collect();
-    assert!(left.iter().all(|n| !n.to_string_lossy().ends_with(".taken")), "the run clears its mark once it answers: {left:?}");
+    // The run leaves its mark for the asker, which reads it after its wait and removes it: an
+    // answer landing as the wait ends can't make the check look untaken.
+    assert!(left.iter().any(|n| n.to_string_lossy().ends_with(".taken")), "the run marks the check it took: {left:?}");
 }
 
 /// A builder that reads one decompiled function (by its MCP name, as Claude Code calls it) and ends
