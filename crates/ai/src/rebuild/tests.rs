@@ -4100,6 +4100,11 @@ fn a_later_run_opens_the_projects_program_again_for_the_builder() {
     assert_eq!(study::program_to_reopen(&target, app.as_ref(), false), None, "Clean room never opens the original");
     assert_eq!(study::program_to_reopen(&TargetRef::Local { path: d.path().join("gone.bin") }, app.as_ref(), true), None, "nothing to open");
     assert_eq!(study::program_to_reopen(&TargetRef::None, app.as_ref(), true), None);
+    // Only a coding agent over SSH has its tools on the other computer; an API builder over SSH
+    // (a tunnelled model) calls them here, so its program is reopened like a local one.
+    assert!(study::tools_run_remotely(true, false), "coding agent over SSH");
+    assert!(!study::tools_run_remotely(true, true), "API builder through an SSH tunnel");
+    assert!(!study::tools_run_remotely(false, false) && !study::tools_run_remotely(false, true));
 
     for deep in [true, false] {
         let mut ws = Workspace::create(d.path(), &format!("Copy {deep}"), "Copy this app", target.clone()).unwrap();

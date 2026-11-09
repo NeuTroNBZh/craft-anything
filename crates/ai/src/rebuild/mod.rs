@@ -835,7 +835,9 @@ impl Worker {
                 self.extract(ws, kind, &name, ex)?;
             }
         } else {
-            self.reopen_target(ws, kind, remote)?;
+            // An API builder over SSH still calls tools in this process, so only a coding agent
+            // on the other computer has a tool server this one can't hand the program to.
+            self.reopen_target(ws, kind, study::tools_run_remotely(remote, api.is_some()))?;
         }
         // A coding agent resumes its own session; our loop resumes its kept transcript.
         let resumable = api.as_ref().is_none_or(crate::agent::ApiConversation::resumed);

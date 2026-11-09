@@ -21,12 +21,18 @@ pub(super) fn program_to_reopen(target: &TargetRef, kind: &dyn TargetKind, deep:
     program.exists().then_some(program)
 }
 
+/// The builder's tools run on another computer: a coding agent over SSH starts its own tool
+/// server there. An API builder over SSH (a tunnelled model) still calls tools in this process.
+pub(super) fn tools_run_remotely(over_ssh: bool, api_loop: bool) -> bool {
+    over_ssh && !api_loop
+}
+
 impl Worker {
     /// A run after the first skips the study, so its session has nothing open and the builder's
     /// first `native_*` calls said "Nothing is open yet" (#1421). Open what the study looked at, so
     /// the builder's tool server gets it. A failure only says why: the builder can still open it.
-    /// `remote`: the builder runs over SSH, whose tool server isn't handed this computer's
-    /// targets, so opening (and hashing) the program here would help nothing.
+    /// `remote`: the builder's tools run on another computer ([`tools_run_remotely`]), whose tool
+    /// server isn't handed this computer's targets, so opening (and hashing) it here helps nothing.
     pub(super) fn reopen_target(&mut self, ws: &mut Workspace, kind: &dyn TargetKind, remote: bool) -> Result<(), ToolError> {
         if remote {
             return Ok(());
