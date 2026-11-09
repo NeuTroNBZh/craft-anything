@@ -25,7 +25,12 @@ impl Worker {
     /// A run after the first skips the study, so its session has nothing open and the builder's
     /// first `native_*` calls said "Nothing is open yet" (#1421). Open what the study looked at, so
     /// the builder's tool server gets it. A failure only says why: the builder can still open it.
-    pub(super) fn reopen_target(&mut self, ws: &mut Workspace, kind: &dyn TargetKind) -> Result<(), ToolError> {
+    /// `remote`: the builder runs over SSH, whose tool server isn't handed this computer's
+    /// targets, so opening (and hashing) the program here would help nothing.
+    pub(super) fn reopen_target(&mut self, ws: &mut Workspace, kind: &dyn TargetKind, remote: bool) -> Result<(), ToolError> {
+        if remote {
+            return Ok(());
+        }
         let (deep, open) = {
             let session = self.engine.session();
             (!session.clean_room(), !session.shared_targets().is_empty())

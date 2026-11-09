@@ -3313,11 +3313,13 @@ fn a_later_run_opens_the_projects_program_again_for_the_builder() {
             self_check: None,
             reset_progress_after_notes: false,
         };
-        w.reopen_target(&mut ws, app.as_ref()).unwrap();
+        w.reopen_target(&mut ws, app.as_ref(), true).unwrap();
+        assert!(w.engine.session().shared_targets().is_empty(), "a builder over SSH isn't handed this computer's targets");
+        w.reopen_target(&mut ws, app.as_ref(), false).unwrap();
         let opened: Vec<PathBuf> = w.engine.session().shared_targets().into_iter().map(|t| t.path).collect();
         if deep {
             assert_eq!(opened, [program.clone()], "the builder's tool server is handed the program");
-            w.reopen_target(&mut ws, app.as_ref()).unwrap();
+            w.reopen_target(&mut ws, app.as_ref(), false).unwrap();
             assert_eq!(w.engine.session().shared_targets().len(), 1, "an open program isn't opened twice");
         } else {
             assert!(opened.is_empty(), "Clean room opens nothing");
