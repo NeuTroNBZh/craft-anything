@@ -1307,7 +1307,7 @@ Gaps found while using the app for real projects.
 - [x] Review of #1417: an answer landing as `rebuild_check`'s wait ended could still read as "no
       build is running", since the run removed its mark when it answered; only the asker removes
       it now. A build stopped during a check answers it ("stopped before this check finished")
-      instead of leaving the builder waiting. The stopped case isn't covered by a test
+      instead of leaving the builder waiting, including a stop seen before the check starts
       — claimed: NeuTroNBZh, branch bugfix/r2.9-rebuild-check-mark-race
 - [ ] Find why a builder's own check stayed on "game-self-test" for over 20 minutes on Windows,
       past the run's 90 s limit on the game's run (seen three times with a Unity 6000.6 build)

@@ -3246,6 +3246,41 @@ fn the_run_answers_the_builders_own_check_during_its_turn() {
     assert!(left.iter().any(|n| n.to_string_lossy().ends_with(".taken")), "the run marks the check it took: {left:?}");
 }
 
+/// A build stopped with a check taken answers it, so the builder isn't left waiting on a check
+/// nothing runs any more; the run's own error stays the stop.
+#[test]
+fn a_stopped_build_answers_the_check_it_took() {
+    let d = tempfile::tempdir().unwrap();
+    let mut ws = Workspace::create(d.path(), "Arena", "Recreate this game", TargetRef::None).unwrap();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let mut w = Worker {
+        wake: Default::default(),
+        engine: Arc::new(Engine::new(craft_anything_engine::testing::session())),
+        tx,
+        stop: CancelToken::default(),
+        preview: Arc::default(),
+        seen: HashSet::new(),
+        inbox: Inbox::new(ws.inbox_dir()),
+        editor: None,
+        notes: Arc::default(),
+        feed: Arc::new(Mutex::new(feed::FeedLog::open(&ws))),
+        keys: crate::KeyStore::file_only(ws.root.join("keys.toml")),
+        kept_checks: Mutex::default(),
+        assets: false,
+        usage: None,
+        self_check: Some((Arc::new(SheetKind), 90.0)),
+        reset_progress_after_notes: false,
+    };
+    let asks = Inbox::new(self_check::asks_dir(&ws.root));
+    let id = asks.post(craft_anything_engine::inbox::RequestKind::Question, "Check the build", "", Vec::new(), false, None).unwrap();
+    w.stop.cancel();
+    let err = w.answer_self_checks(&mut ws).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Cancelled, "the run still stops");
+    let answer = asks.wait(&id, Duration::from_secs(2), &|| false).expect("the taken check is answered");
+    assert_eq!(answer.text.as_deref(), Some(self_check::STOPPED_ANSWER));
+    assert!(self_check::taken_mark(&ws.root, &id).unwrap().is_file(), "the mark is left for the asker to read");
+}
+
 /// A builder that reads one decompiled function (by its MCP name, as Claude Code calls it) and ends
 /// its turn.
 struct Decompiles {
