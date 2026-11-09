@@ -296,7 +296,6 @@ impl RebuildRun {
             notes: notes.clone(),
             feed: feed.clone(),
             assets: false,
-            decompiled: false,
             usage: Some(UsageClock { root: root.clone(), since: Instant::now() }),
             self_check: None,
             reset_progress_after_notes: false,
@@ -488,8 +487,6 @@ struct Worker {
     /// An asset provider's key is set up, so the builder can generate pictures and 3D models if the
     /// project allows it.
     assets: bool,
-    /// The builder has decompiled something this run (Deep mode requires it).
-    decompiled: bool,
     /// Where this run adds its working time, tokens and cost (`None` in tests that don't build).
     usage: Option<UsageClock>,
     /// The kind and bar the builder's own checks (`rebuild_check`) are judged by, once known.
@@ -968,7 +965,8 @@ impl Worker {
                     prompt = p;
                     continue;
                 }
-                if must_decompile && !self.decompiled && !reminded {
+                // Decompiling in an earlier run counts: each request from the person is a new run.
+                if must_decompile && !ws.manifest.decompiled && !reminded {
                     reminded = true;
                     prompt = DECOMPILE_FIRST.to_string();
                     continue;
@@ -1292,7 +1290,7 @@ impl Worker {
                     AgentEvent::ToolStarted { tool, .. }
                         if self.engine.registry().canonical(tool) == Some(craft_anything_engine::tools::native_function::PSEUDOCODE_TOOL) =>
                     {
-                        self.decompiled = true
+                        ws.manifest.decompiled = true
                     }
                     AgentEvent::Error { message, remediation, .. } => failed = Some((message.clone(), remediation.clone())),
                     _ => {}

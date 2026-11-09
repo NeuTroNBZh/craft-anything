@@ -451,6 +451,12 @@ pub struct Manifest {
     /// Kept in the project so "Try again" can't restart the count.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub not_working_checks: u32,
+    /// The builder has read the original's code (a decompiled function) in this project, in any run.
+    /// Deep mode reminds a builder that hasn't; kept here because every request starts a new run, so
+    /// a run-only flag repeated the reminder after each request. An older build drops it when it
+    /// saves, which costs at most one more reminder, so the format version stays.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub decompiled: bool,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -491,6 +497,7 @@ impl Manifest {
             approvals: Default::default(),
             awaiting_check: false,
             not_working_checks: 0,
+            decompiled: false,
         }
     }
 

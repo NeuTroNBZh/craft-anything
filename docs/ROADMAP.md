@@ -1276,6 +1276,12 @@ Gaps found while using the app for real projects.
       no cost. Live check (2026-11-09, Haiku 5.5): the second turn's own tokens cost $0.00146751, and
       the reported running total was $0.00350053. Earlier builds' totals stay as they were.
       — claimed: fabox-os, branch bugfix/1187-claude-resumed-cost
+- [x] A Deep-mode build told the builder "You haven't decompiled anything yet" after every request
+      from the person, though it had read decompiled functions in an earlier run: the flag lived
+      only for one run, and each request starts a new one. It is now kept in craft.json
+      (`decompiled`), so a run reminds the builder only while it has never decompiled in this
+      project. Unit test only; not run live
+      — claimed: NeuTroNBZh, branch bugfix/r2.9-decompile-reminder-every-request
 
 ### R2.10 Pinned builds
 Owner: maintainers · Status: in progress
